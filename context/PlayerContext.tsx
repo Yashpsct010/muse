@@ -44,7 +44,17 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         setSound(null);
       }
 
-      const resolvedUrl = track.url || `${API_URL}/api/stream?id=${track.id}`;
+      let resolvedUrl = track.url;
+
+      if (!resolvedUrl) {
+        // Fetch the direct audio URL from our Python Vercel function
+        const streamRes = await fetch(`${API_URL}/api/stream?id=${track.id}`);
+        const streamData = await streamRes.json();
+        if (!streamRes.ok || !streamData.url) {
+          throw new Error(streamData.error || 'Failed to get stream URL');
+        }
+        resolvedUrl = streamData.url;
+      }
 
       if (Platform.OS !== 'web') {
         await Audio.setAudioModeAsync({
@@ -54,7 +64,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       }
 
       const { sound: newSound } = await Audio.Sound.createAsync(
-        { uri: resolvedUrl },
+        { uri: resolvedUrl as string },
         { shouldPlay: true },
         (status) => {
           if (status.isLoaded) {

@@ -5,63 +5,70 @@ import { usePlayer } from '../context/PlayerContext';
 export default function MiniPlayer() {
   const { currentTrack, isPlaying, togglePlayPause } = usePlayer();
 
-  if (!currentTrack) {
-    return null; // Don't show player if nothing is playing
-  }
+  if (!currentTrack) return null;
 
   return (
-    <TouchableOpacity style={styles.container} activeOpacity={0.9}>
-      <View style={styles.trackInfo}>
-        <Image 
-          source={{ uri: currentTrack.image }} 
-          style={styles.albumArt} 
-        />
-        <View style={styles.textContainer}>
-          <Text style={styles.title} numberOfLines={1}>{currentTrack.title}</Text>
-          <Text style={styles.artist} numberOfLines={1}>{currentTrack.artist}</Text>
-        </View>
-      </View>
-      
-      <View style={styles.controls}>
-        <TouchableOpacity style={styles.controlBtn}>
-          <Volume2 color="#1DB954" size={20} />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.controlBtn}>
-          <Heart color="#FFFFFF" size={20} />
-        </TouchableOpacity>
-        <TouchableOpacity 
-          style={styles.controlBtn}
-          onPress={togglePlayPause}
-        >
-          {isPlaying ? (
-            <Pause color="#FFFFFF" size={24} fill="#FFFFFF" />
-          ) : (
-            <Play color="#FFFFFF" size={24} fill="#FFFFFF" />
-          )}
-        </TouchableOpacity>
-      </View>
+    <View style={styles.wrapper}>
+      {/* Progress bar sits at the very top edge of the card */}
       <View style={styles.progressBar}>
         <View style={[styles.progressCurrent, { width: isPlaying ? '45%' : '15%' }]} />
       </View>
-    </TouchableOpacity>
+
+      <TouchableOpacity style={styles.row} activeOpacity={0.9}>
+        <View style={styles.trackInfo}>
+          <Image source={{ uri: currentTrack.image }} style={styles.albumArt} />
+          <View style={styles.textContainer}>
+            <Text style={styles.title} numberOfLines={1}>{currentTrack.title}</Text>
+            <Text style={styles.artist} numberOfLines={1}>{currentTrack.artist}</Text>
+          </View>
+        </View>
+
+        <View style={styles.controls}>
+          <TouchableOpacity style={styles.controlBtn}>
+            <Volume2 color="#1DB954" size={20} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.controlBtn}>
+            <Heart color="#FFFFFF" size={20} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.controlBtn} onPress={togglePlayPause}>
+            {isPlaying ? (
+              <Pause color="#FFFFFF" size={24} fill="#FFFFFF" />
+            ) : (
+              <Play color="#FFFFFF" size={24} fill="#FFFFFF" />
+            )}
+          </TouchableOpacity>
+        </View>
+      </TouchableOpacity>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    backgroundColor: '#303030', // Surface Container
+  wrapper: {
+    backgroundColor: '#303030',
     borderRadius: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 8,
-    // Soft shadow
+    overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 10,
     elevation: 5,
-    overflow: 'hidden',
+  },
+  progressBar: {
+    height: 2,
+    width: '100%',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+  },
+  progressCurrent: {
+    height: '100%',
+    backgroundColor: '#1DB954',
+    borderRadius: 1,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 8,
   },
   trackInfo: {
     flexDirection: 'row',
@@ -92,18 +99,5 @@ const styles = StyleSheet.create({
   },
   controlBtn: {
     marginLeft: 16,
-  },
-  progressBar: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 2,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-  },
-  progressCurrent: {
-    height: '100%',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 1,
   },
 });
