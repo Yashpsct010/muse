@@ -96,11 +96,10 @@ const styles = StyleSheet.create({
   progressBar: {
     position: 'absolute',
     bottom: 0,
-    left: 8,
-    right: 8,
+    left: 0,
+    right: 0,
     height: 2,
     backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 1,
   },
   progressCurrent: {
     height: '100%',

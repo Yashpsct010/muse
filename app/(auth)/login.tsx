@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import { Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { API_URL } from '../../constants/api';
@@ -24,8 +24,14 @@ export default function LoginScreen() {
         body: JSON.stringify({ email: email.toLowerCase(), password }),
       });
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Login failed');
+      const textResponse = await res.text();
+      let data;
+      try {
+        data = JSON.parse(textResponse);
+      } catch (_e) {
+        throw new Error(textResponse || 'Server error');
+      }
+      if (!res.ok) throw new Error(data?.error || 'Login failed');
 
       // Fetch user data using token
       const meRes = await fetch(`${API_URL}/api/auth/me`, {
@@ -43,7 +49,7 @@ export default function LoginScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <Text style={styles.title}>Log in to Spotify Clone</Text>
+      <Text style={styles.title}>Log in to Muse</Text>
       
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
@@ -70,7 +76,7 @@ export default function LoginScreen() {
       </TouchableOpacity>
 
       <TouchableOpacity onPress={() => router.push('/(auth)/register')} style={{ marginTop: 24 }}>
-        <Text style={styles.linkText}>Don't have an account? Sign up.</Text>
+        <Text style={styles.linkText}>Don&apos;t have an account? Sign up.</Text>
       </TouchableOpacity>
       
       <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 24 }}>

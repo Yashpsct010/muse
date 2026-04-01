@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import { Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { API_URL } from '../../constants/api';
@@ -25,8 +25,10 @@ export default function RegisterScreen() {
         body: JSON.stringify({ username, email: email.toLowerCase(), password }),
       });
 
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Registration failed');
+      const textResponse = await res.text();
+      let data;
+      try { data = JSON.parse(textResponse); } catch (_e) { throw new Error(textResponse || 'Server error'); }
+      if (!res.ok) throw new Error(data?.error || 'Registration failed');
 
       // Fetch user data using token
       const meRes = await fetch(`${API_URL}/api/auth/me`, {
@@ -44,7 +46,7 @@ export default function RegisterScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <Text style={styles.title}>Sign up for free to start listening.</Text>
+      <Text style={styles.title}>Sign up for Muse</Text>
       
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
 

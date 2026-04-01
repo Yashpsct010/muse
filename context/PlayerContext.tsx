@@ -4,11 +4,11 @@ import { Audio } from 'expo-av';
 import { API_URL } from '../constants/api';
 
 export type Track = {
-  id: string; // YouTube Video ID representing the song
+  id: string;       // YouTube Video ID
   title: string;
   artist: string;
   image: string;
-  url?: string; // Optional direct stream URL
+  url?: string;
 };
 
 type PlayerContextType = {
@@ -29,11 +29,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const [sound, setSound] = useState<Audio.Sound | null>(null);
 
   useEffect(() => {
-    // Cleanup sound on unmount
     return () => {
-      if (sound) {
-        sound.unloadAsync();
-      }
+      if (sound) sound.unloadAsync();
     };
   }, [sound]);
 
@@ -41,16 +38,14 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     try {
       setIsLoading(true);
       setCurrentTrack(track);
-      
+
       if (sound) {
         await sound.unloadAsync();
         setSound(null);
       }
 
-      // 1. Determine local stream proxy URL or use hardcoded if available
       const resolvedUrl = track.url || `${API_URL}/api/stream?id=${track.id}`;
 
-      // 2. Configure audio session (not supported on web)
       if (Platform.OS !== 'web') {
         await Audio.setAudioModeAsync({
           playsInSilentModeIOS: true,
@@ -58,40 +53,34 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         });
       }
 
-      // 3. Play stream directly from localhost proxy
       const { sound: newSound } = await Audio.Sound.createAsync(
         { uri: resolvedUrl },
         { shouldPlay: true },
-        onPlaybackStatusUpdate
+        (status) => {
+          if (status.isLoaded) {
+            setIsPlaying(status.isPlaying);
+            if (status.didJustFinish) setIsPlaying(false);
+          }
+        }
       );
 
       setSound(newSound);
       setIsPlaying(true);
       setIsLoading(false);
     } catch (error) {
-      console.log('Error streaming track', error);
+      console.error('Error streaming track', error);
       setIsLoading(false);
     }
   };
 
-  const onPlaybackStatusUpdate = (status: any) => {
-    if (status.isLoaded) {
-      setIsPlaying(status.isPlaying);
-      if (status.didJustFinish) {
-        setIsPlaying(false);
-      }
-    }
-  };
-
   const togglePlayPause = async () => {
-    if (sound) {
-      if (isPlaying) {
-        await sound.pauseAsync();
-        setIsPlaying(false);
-      } else {
-        await sound.playAsync();
-        setIsPlaying(true);
-      }
+    if (!sound) return;
+    if (isPlaying) {
+      await sound.pauseAsync();
+      setIsPlaying(false);
+    } else {
+      await sound.playAsync();
+      setIsPlaying(true);
     }
   };
 
@@ -103,9 +92,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
 }
 
 export const usePlayer = () => {
-  const context = useContext(PlayerContext);
-  if (!context) {
-    throw new Error('usePlayer must be used within a PlayerProvider');
-  }
-  return context;
+  const ctx = useContext(PlayerContext);
+  if (!ctx) throw new Error('usePlayer must be used within a PlayerProvider');
+  return ctx;
 };

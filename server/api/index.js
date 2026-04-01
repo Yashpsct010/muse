@@ -1,7 +1,6 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const { spawn } = require('child_process');
 const yts = require('yt-search');
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
@@ -230,62 +229,17 @@ app.get('/api/resolve', async (req, res) => {
   }
 });
 
-// Endpoint 2: Proxy Direct Audio Stream
-app.get('/api/stream', async (req, res) => {
-  const { id } = req.query;
-  if (!id) {
-    return res.status(400).json({ error: 'Missing track id' });
-  }
+// /api/stream is handled by api/stream.py (Python serverless function on Vercel)
+// which uses yt-dlp to extract and redirect to the raw audio URL.
 
-  // YouTube video IDs are exactly 11 alphanumeric/dash/underscore chars.
-  const cleanId = String(id).replace(/[^a-zA-Z0-9_-]/g, '').substring(0, 11);
-  if (cleanId.length < 11) {
-    return res.status(400).json({ error: `Invalid video id: ${id}` });
-  }
-
-  const videoUrl = `https://www.youtube.com/watch?v=${cleanId}`;
-  console.log('Streaming:', videoUrl);
-
-  // yt-dlp is the most reliable YouTube extractor (updated frequently).
-  const ytdlp = spawn('python', [
-    '-m', 'yt_dlp',
-    '-f', 'bestaudio',
-    '--no-playlist',
-    '-o', '-',
-    '--quiet',
-    videoUrl,
-  ]);
-
-  res.setHeader('Content-Type', 'audio/webm');
-  res.setHeader('Accept-Ranges', 'none');
-
-  ytdlp.stdout.pipe(res);
-
-  let stderrOutput = '';
-  ytdlp.stderr.on('data', (d) => { stderrOutput += d.toString(); });
-
-  ytdlp.on('error', (err) => {
-    console.error('yt-dlp spawn error:', err.message);
-    if (!res.headersSent) res.status(500).json({ error: 'yt-dlp not available' });
-  });
-
-  ytdlp.on('close', (code) => {
-    if (code !== 0 && code !== null) {
-      console.error('yt-dlp exited', code, stderrOutput.slice(-300));
-      if (!res.headersSent) res.status(500).json({ error: 'Stream failed' });
-    }
-  });
-
-  req.on('close', () => ytdlp.kill());
-});
-
-// For local testing
+// For local development only
 if (process.env.NODE_ENV !== 'production') {
   const PORT = process.env.PORT || 4000;
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Backend server listening on http://0.0.0.0:${PORT} (allowing all local connections)`);
+    console.log(`Backend server listening on http://0.0.0.0:${PORT}`);
   });
 }
 
 // For Vercel serverless deployment
 module.exports = app;
+

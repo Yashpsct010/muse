@@ -47,6 +47,12 @@ export default function TabLayout() {
             tabBarIcon: ({ color }) => <Library color={color} size={24} />,
           }}
         />
+        <Tabs.Screen
+          name="playlist/[id]"
+          options={{
+            href: null,
+          }}
+        />
       </Tabs>
       {/* Mini Player Placeholder - Floating above tabs */}
       <View style={styles.miniPlayerContainer}>
