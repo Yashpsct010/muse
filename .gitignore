@@ -31,7 +31,7 @@ yarn-error.*
 *.pem
 
 # local env files
-.env*.local
+.env
 
 # typescript
 *.tsbuildinfo
@@ -41,3 +41,11 @@ app-example
 # generated native folders
 /ios
 /android
+
+*-player-script.js
+SPOTIFY_INTEGRATION.md
+CLAUDE.md
+
+# Build Outputs
+*.apk
+*.aab
