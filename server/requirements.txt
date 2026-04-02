@@ -1,1 +1,1 @@
-yt-dlp
+# No pip packages needed — Piped API approach uses only Python stdlib
