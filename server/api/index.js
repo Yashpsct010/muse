@@ -248,8 +248,7 @@ function extractAudioUrl(videoId) {
   return new Promise((resolve, reject) => {
     const cmd = [
       `"${YTDLP_BIN}"`,
-      '--format', '140/bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio',
-      '--extractor-args', 'youtube:player_client=ios',
+      '--format', 'bestaudio',
       '--get-url',
       '--no-warnings',
       '--no-playlist',
@@ -293,7 +292,7 @@ app.get('/api/stream', async (req, res) => {
     audioUrl,
     {
       headers: {
-        'User-Agent': 'com.google.ios.youtube/19.09.3 (iPhone14,3; U; CPU iOS 16_3_1 like Mac OS X)',
+        'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1)',
         'Range': rangeHeader,
         'Origin': 'https://www.youtube.com',
         'Referer': 'https://www.youtube.com/',
