@@ -4,6 +4,7 @@ const cors = require('cors');
 const { exec } = require('child_process');
 const https = require('https');
 const http = require('http');
+const path = require('path');
 const yts = require('yt-search');
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
@@ -245,9 +246,10 @@ app.get('/api/stream', (req, res) => {
 
   console.log('[stream] Resolving:', videoUrl);
 
-  // -g flag: print URL only, no download — very fast
+  // Use locally downloaded yt-dlp binary (latest from GitHub, not outdated nix package)
+  const YTDLP = path.join(process.cwd(), 'yt-dlp');
   exec(
-    `yt-dlp -g -f "bestaudio[ext=m4a]/bestaudio/best" --no-playlist --quiet "${videoUrl}"`,
+    `"${YTDLP}" -g -f "bestaudio[ext=m4a]/bestaudio/best" --no-playlist --quiet "${videoUrl}"`,
     { timeout: 30000 },
     (_err, stdout, stderr) => {
       if (_err || !stdout.trim()) {
