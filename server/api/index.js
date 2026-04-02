@@ -17,6 +17,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// yt-dlp binary downloaded via postinstall — always latest version from GitHub
+const YTDLP_BIN = path.join(__dirname, '..', 'yt-dlp');
+
 // Connect to MongoDB
 if (process.env.MONGODB_URI) {
   mongoose.connect(process.env.MONGODB_URI)
@@ -233,68 +236,86 @@ app.get('/api/resolve', async (req, res) => {
   }
 });
 
-// Audio Stream
-// Step 1: yt-dlp extracts the signed Google CDN URL (fast, ~1-3s)
-// Step 2: Railway proxies that URL back to the client with proper headers
-// This gives ExoPlayer Content-Length + Accept-Ranges so it can probe/seek correctly
-app.get('/api/stream', (req, res) => {
+// Debug: verify which yt-dlp version Railway is actually using
+app.get('/api/ytdlp-version', (req, res) => {
+  exec(`"${YTDLP_BIN}" --version`, (err, stdout) => {
+    if (err) return res.status(500).json({ error: err.message, bin: YTDLP_BIN });
+    res.json({ version: stdout.trim(), bin: YTDLP_BIN });
+  });
+});
+
+function extractAudioUrl(videoId) {
+  return new Promise((resolve, reject) => {
+    const cmd = [
+      `"${YTDLP_BIN}"`,
+      '--format', '140/bestaudio[ext=m4a]/bestaudio[acodec^=mp4a]/bestaudio',
+      '--extractor-args', 'youtube:player_client=ios',
+      '--get-url',
+      '--no-warnings',
+      '--no-playlist',
+      `https://www.youtube.com/watch?v=${videoId}`,
+    ].join(' ');
+
+    exec(cmd, { timeout: 25000 }, (err, stdout, stderr) => {
+      if (err) {
+        console.error('[yt-dlp error]', stderr);
+        return reject(new Error('yt-dlp failed: ' + stderr.trim()));
+      }
+      const url = stdout.trim().split('\n')[0];
+      if (!url || !url.startsWith('http')) {
+        return reject(new Error('yt-dlp returned invalid URL: ' + url));
+      }
+      resolve(url);
+    });
+  });
+}
+
+app.get('/api/stream', async (req, res) => {
   const { id } = req.query;
-  if (!id) return res.status(400).json({ error: 'Missing id' });
+  if (!id || !/^[a-zA-Z0-9_-]{11}$/.test(id)) {
+    return res.status(400).json({ error: 'Invalid or missing video ID' });
+  }
 
-  const cleanId = String(id).replace(/[^a-zA-Z0-9_-]/g, '').substring(0, 11);
-  const videoUrl = `https://www.youtube.com/watch?v=${cleanId}`;
+  let audioUrl;
+  try {
+    audioUrl = await extractAudioUrl(id);
+    console.log('[stream] Extracted for ' + id + ': ' + audioUrl.slice(0, 80) + '...');
+  } catch (err) {
+    console.error('[stream] Extraction failed:', err.message);
+    return res.status(502).json({ error: 'Audio extraction failed', detail: err.message });
+  }
 
-  console.log('[stream] Resolving:', videoUrl);
+  const parsedUrl = new URL(audioUrl);
+  const lib = parsedUrl.protocol === 'https:' ? https : http;
+  const rangeHeader = req.headers['range'] || 'bytes=0-';
 
-  // Use locally downloaded yt-dlp binary (latest from GitHub, not outdated nix package)
-  const YTDLP = path.join(process.cwd(), 'yt-dlp');
-  exec(
-    `"${YTDLP}" -g -f "bestaudio[ext=m4a]/bestaudio/best" --no-playlist --quiet "${videoUrl}"`,
-    { timeout: 30000 },
-    (_err, stdout, stderr) => {
-      if (_err || !stdout.trim()) {
-        console.error('[yt-dlp] error:', stderr);
-        return res.status(500).json({ error: 'Failed to resolve audio URL' });
-      }
-
-      const audioUrl = stdout.trim().split('\n')[0];
-      console.log('[stream] Proxying:', audioUrl.substring(0, 60) + '...');
-
-      let parsedUrl;
-      try { parsedUrl = new URL(audioUrl); } catch {
-        return res.status(500).json({ error: 'Invalid audio URL' });
-      }
-
-      const protocol = parsedUrl.protocol === 'https:' ? https : http;
-      const proxyReq = protocol.get({
-        hostname: parsedUrl.hostname,
-        path: parsedUrl.pathname + parsedUrl.search,
-        headers: {
-          // Forward Range header so ExoPlayer can seek
-          ...(req.headers.range ? { Range: req.headers.range } : {}),
-          'User-Agent': 'Mozilla/5.0 (compatible)',
-        },
-      }, (proxyRes) => {
-        const headers = {
-          'Content-Type': proxyRes.headers['content-type'] || 'audio/mp4',
-          'Access-Control-Allow-Origin': '*',
-          'Accept-Ranges': 'bytes',
-        };
-        if (proxyRes.headers['content-length'])  headers['Content-Length']  = proxyRes.headers['content-length'];
-        if (proxyRes.headers['content-range'])   headers['Content-Range']   = proxyRes.headers['content-range'];
-
-        res.writeHead(proxyRes.statusCode || 200, headers);
-        proxyRes.pipe(res);
-      });
-
-      proxyReq.on('error', (err) => {
-        console.error('[proxy] error:', err.message);
-        if (!res.headersSent) res.status(502).json({ error: 'Proxy error' });
-      });
-
-      req.on('close', () => proxyReq.destroy());
+  const upstreamReq = lib.get(
+    audioUrl,
+    {
+      headers: {
+        'User-Agent': 'com.google.ios.youtube/19.09.3 (iPhone14,3; U; CPU iOS 16_3_1 like Mac OS X)',
+        'Range': rangeHeader,
+        'Origin': 'https://www.youtube.com',
+        'Referer': 'https://www.youtube.com/',
+      },
+    },
+    (upstreamRes) => {
+      res.status(upstreamRes.statusCode || 200);
+      res.setHeader('Content-Type', upstreamRes.headers['content-type'] || 'audio/mp4');
+      res.setHeader('Accept-Ranges', 'bytes');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      if (upstreamRes.headers['content-length']) res.setHeader('Content-Length', upstreamRes.headers['content-length']);
+      if (upstreamRes.headers['content-range'])  res.setHeader('Content-Range',  upstreamRes.headers['content-range']);
+      upstreamRes.pipe(res);
     }
   );
+
+  upstreamReq.on('error', (err) => {
+    console.error('[stream] Upstream error:', err.message);
+    if (!res.headersSent) res.status(502).json({ error: 'Upstream stream failed' });
+  });
+
+  req.on('close', () => upstreamReq.destroy());
 });
 
 // Start server — Railway provides PORT env var automatically
