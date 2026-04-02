@@ -5,6 +5,7 @@ const { exec } = require('child_process');
 const https = require('https');
 const http = require('http');
 const path = require('path');
+const fs = require('fs');
 const yts = require('yt-search');
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
@@ -19,6 +20,21 @@ app.use(express.json());
 
 // yt-dlp binary downloaded via postinstall — always latest version from GitHub
 const YTDLP_BIN = path.join(__dirname, '..', 'yt-dlp');
+
+// YouTube cookies — needed because Railway's IP is flagged as a bot by YouTube
+// Set YOUTUBE_COOKIES env var in Railway dashboard with the contents of cookies.txt
+const COOKIES_FILE = '/tmp/yt_cookies.txt';
+if (process.env.YOUTUBE_COOKIES) {
+  fs.writeFileSync(COOKIES_FILE, process.env.YOUTUBE_COOKIES, 'utf8');
+  console.log('[cookies] YouTube cookies loaded from env var');
+} else {
+  console.warn('[cookies] YOUTUBE_COOKIES not set — yt-dlp may be blocked by YouTube bot detection');
+}
+
+// In-memory cache: expo-av sends multiple Range requests per playback session
+// Cache the Google CDN URL so yt-dlp only runs ONCE per video (TTL: 4 hours)
+const urlCache = new Map();
+const CACHE_TTL = 4 * 60 * 60 * 1000;
 
 // Connect to MongoDB
 if (process.env.MONGODB_URI) {
@@ -246,14 +262,26 @@ app.get('/api/ytdlp-version', (req, res) => {
 
 function extractAudioUrl(videoId) {
   return new Promise((resolve, reject) => {
-    const cmd = [
+    // Serve from cache if fresh (avoids duplicate yt-dlp calls from expo-av Range probes)
+    const cached = urlCache.get(videoId);
+    if (cached && Date.now() - cached.ts < CACHE_TTL) {
+      console.log('[cache] hit for', videoId);
+      return resolve(cached.url);
+    }
+
+    const cmdParts = [
       `"${YTDLP_BIN}"`,
       '--format', 'bestaudio',
       '--get-url',
       '--no-warnings',
       '--no-playlist',
-      `https://www.youtube.com/watch?v=${videoId}`,
-    ].join(' ');
+    ];
+    // Pass cookies if available — required to bypass YouTube bot detection on cloud IPs
+    if (process.env.YOUTUBE_COOKIES) {
+      cmdParts.push('--cookies', COOKIES_FILE);
+    }
+    cmdParts.push(`https://www.youtube.com/watch?v=${videoId}`);
+    const cmd = cmdParts.join(' ');
 
     exec(cmd, { timeout: 25000 }, (err, stdout, stderr) => {
       if (err) {
@@ -264,6 +292,7 @@ function extractAudioUrl(videoId) {
       if (!url || !url.startsWith('http')) {
         return reject(new Error('yt-dlp returned invalid URL: ' + url));
       }
+      urlCache.set(videoId, { url, ts: Date.now() });
       resolve(url);
     });
   });
