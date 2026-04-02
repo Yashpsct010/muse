@@ -1,10 +1,9 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { Platform } from 'react-native';
-import { Audio } from 'expo-av';
+import { AudioPlayer } from 'expo-audio';
 import { API_URL } from '../constants/api';
 
 export type Track = {
-  id: string;       // YouTube Video ID
+  id: string;
   title: string;
   artist: string;
   image: string;
@@ -16,86 +15,65 @@ type PlayerContextType = {
   isPlaying: boolean;
   isLoading: boolean;
   playTrack: (track: Track) => Promise<void>;
-  togglePlayPause: () => Promise<void>;
-  sound: Audio.Sound | null;
+  togglePlayPause: () => void;
 };
 
 const PlayerContext = createContext<PlayerContextType | undefined>(undefined);
 
+// Module-level player so audio continues when navigating between screens
+let globalPlayer: AudioPlayer | null = null;
+
 export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [sound, setSound] = useState<Audio.Sound | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (sound) sound.unloadAsync();
-    };
-  }, [sound]);
+  const [isPlaying, setIsPlaying] = useState(false);
 
   const playTrack = async (track: Track) => {
     try {
       setIsLoading(true);
       setCurrentTrack(track);
 
-      if (sound) {
-        await sound.unloadAsync();
-        setSound(null);
+      // Railway streams audio directly — just pass the URL
+      const streamUrl = track.url || `${API_URL}/api/stream?id=${track.id}`;
+
+      // Release previous player cleanly
+      if (globalPlayer) {
+        globalPlayer.remove();
+        globalPlayer = null;
       }
 
-      let resolvedUrl = track.url;
+      const player = new AudioPlayer({ uri: streamUrl });
+      globalPlayer = player;
 
-      if (!resolvedUrl) {
-        // Fetch the direct audio URL from our Python Vercel function
-        const streamRes = await fetch(`${API_URL}/api/stream?id=${track.id}`);
-        const streamData = await streamRes.json();
-        if (!streamRes.ok || !streamData.url) {
-          throw new Error(streamData.error || 'Failed to get stream URL');
-        }
-        resolvedUrl = streamData.url;
-      }
-
-      if (Platform.OS !== 'web') {
-        await Audio.setAudioModeAsync({
-          playsInSilentModeIOS: true,
-          staysActiveInBackground: true,
-        });
-      }
-
-      const { sound: newSound } = await Audio.Sound.createAsync(
-        { uri: resolvedUrl as string },
-        { shouldPlay: true },
-        (status) => {
-          if (status.isLoaded) {
-            setIsPlaying(status.isPlaying);
-            if (status.didJustFinish) setIsPlaying(false);
-          }
-        }
-      );
-
-      setSound(newSound);
+      await player.play();
       setIsPlaying(true);
-      setIsLoading(false);
     } catch (error) {
-      console.error('Error streaming track', error);
+      console.error('Error playing track:', error);
+    } finally {
       setIsLoading(false);
     }
   };
 
-  const togglePlayPause = async () => {
-    if (!sound) return;
+  const togglePlayPause = () => {
+    if (!globalPlayer) return;
     if (isPlaying) {
-      await sound.pauseAsync();
+      globalPlayer.pause();
       setIsPlaying(false);
     } else {
-      await sound.playAsync();
+      globalPlayer.play();
       setIsPlaying(true);
     }
   };
 
+  useEffect(() => {
+    return () => {
+      globalPlayer?.remove();
+      globalPlayer = null;
+    };
+  }, []);
+
   return (
-    <PlayerContext.Provider value={{ currentTrack, isPlaying, isLoading, playTrack, togglePlayPause, sound }}>
+    <PlayerContext.Provider value={{ currentTrack, isPlaying, isLoading, playTrack, togglePlayPause }}>
       {children}
     </PlayerContext.Provider>
   );
