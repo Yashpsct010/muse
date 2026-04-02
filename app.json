@@ -40,8 +40,7 @@
           }
         }
       ],
-      "expo-secure-store",
-      "expo-audio"
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true,

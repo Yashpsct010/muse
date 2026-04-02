@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { AudioPlayer } from 'expo-audio';
+import { Audio } from 'expo-av';
 import { API_URL } from '../constants/api';
 
 export type Track = {
@@ -15,37 +15,55 @@ type PlayerContextType = {
   isPlaying: boolean;
   isLoading: boolean;
   playTrack: (track: Track) => Promise<void>;
-  togglePlayPause: () => void;
+  togglePlayPause: () => Promise<void>;
 };
 
 const PlayerContext = createContext<PlayerContextType | undefined>(undefined);
-
-// Module-level player so audio continues when navigating between screens
-let globalPlayer: AudioPlayer | null = null;
 
 export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [sound, setSound] = useState<Audio.Sound | null>(null);
+
+  // Cleanup sound on unmount
+  useEffect(() => {
+    return () => { sound?.unloadAsync(); };
+  }, [sound]);
 
   const playTrack = async (track: Track) => {
     try {
       setIsLoading(true);
       setCurrentTrack(track);
 
-      // Railway streams audio directly — just pass the URL
-      const streamUrl = track.url || `${API_URL}/api/stream?id=${track.id}`;
-
-      // Release previous player cleanly
-      if (globalPlayer) {
-        globalPlayer.remove();
-        globalPlayer = null;
+      // Unload the previous track
+      if (sound) {
+        await sound.unloadAsync();
+        setSound(null);
       }
 
-      const player = new AudioPlayer({ uri: streamUrl });
-      globalPlayer = player;
+      // Set audio mode for background play
+      await Audio.setAudioModeAsync({
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: true,
+      });
 
-      await player.play();
+      // Railway streams audio directly — a clean HTTP audio pipe from yt-dlp
+      const streamUrl = track.url || `${API_URL}/api/stream?id=${track.id}`;
+      console.log('Playing:', streamUrl);
+
+      const { sound: newSound } = await Audio.Sound.createAsync(
+        { uri: streamUrl },
+        { shouldPlay: true },
+        (status) => {
+          if (status.isLoaded) {
+            setIsPlaying(status.isPlaying);
+            if (status.didJustFinish) setIsPlaying(false);
+          }
+        }
+      );
+
+      setSound(newSound);
       setIsPlaying(true);
     } catch (error) {
       console.error('Error playing track:', error);
@@ -54,23 +72,16 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const togglePlayPause = () => {
-    if (!globalPlayer) return;
+  const togglePlayPause = async () => {
+    if (!sound) return;
     if (isPlaying) {
-      globalPlayer.pause();
+      await sound.pauseAsync();
       setIsPlaying(false);
     } else {
-      globalPlayer.play();
+      await sound.playAsync();
       setIsPlaying(true);
     }
   };
-
-  useEffect(() => {
-    return () => {
-      globalPlayer?.remove();
-      globalPlayer = null;
-    };
-  }, []);
 
   return (
     <PlayerContext.Provider value={{ currentTrack, isPlaying, isLoading, playTrack, togglePlayPause }}>

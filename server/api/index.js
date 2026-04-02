@@ -1,7 +1,9 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const { spawn } = require('child_process');
+const { exec } = require('child_process');
+const https = require('https');
+const http = require('http');
 const yts = require('yt-search');
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
@@ -230,8 +232,10 @@ app.get('/api/resolve', async (req, res) => {
   }
 });
 
-// Audio Stream — pipes yt-dlp audio directly to the client
-// Works on Railway (no timeout), client plays a plain HTTP audio stream
+// Audio Stream
+// Step 1: yt-dlp extracts the signed Google CDN URL (fast, ~1-3s)
+// Step 2: Railway proxies that URL back to the client with proper headers
+// This gives ExoPlayer Content-Length + Accept-Ranges so it can probe/seek correctly
 app.get('/api/stream', (req, res) => {
   const { id } = req.query;
   if (!id) return res.status(400).json({ error: 'Missing id' });
@@ -239,34 +243,56 @@ app.get('/api/stream', (req, res) => {
   const cleanId = String(id).replace(/[^a-zA-Z0-9_-]/g, '').substring(0, 11);
   const videoUrl = `https://www.youtube.com/watch?v=${cleanId}`;
 
-  console.log('Streaming:', videoUrl);
+  console.log('[stream] Resolving:', videoUrl);
 
-  const ytdlp = spawn('yt-dlp', [
-    '-f', 'bestaudio[ext=m4a]/bestaudio/best',
-    '-o', '-',
-    '--quiet',
-    '--no-playlist',
-    videoUrl,
-  ]);
+  // -g flag: print URL only, no download — very fast
+  exec(
+    `yt-dlp -g -f "bestaudio[ext=m4a]/bestaudio/best" --no-playlist --quiet "${videoUrl}"`,
+    { timeout: 30000 },
+    (_err, stdout, stderr) => {
+      if (_err || !stdout.trim()) {
+        console.error('[yt-dlp] error:', stderr);
+        return res.status(500).json({ error: 'Failed to resolve audio URL' });
+      }
 
-  res.setHeader('Content-Type', 'audio/mp4');
-  res.setHeader('Transfer-Encoding', 'chunked');
-  res.setHeader('Access-Control-Allow-Origin', '*');
+      const audioUrl = stdout.trim().split('\n')[0];
+      console.log('[stream] Proxying:', audioUrl.substring(0, 60) + '...');
 
-  ytdlp.stdout.pipe(res);
+      let parsedUrl;
+      try { parsedUrl = new URL(audioUrl); } catch {
+        return res.status(500).json({ error: 'Invalid audio URL' });
+      }
 
-  ytdlp.stderr.on('data', (d) => console.error('[yt-dlp]', d.toString()));
+      const protocol = parsedUrl.protocol === 'https:' ? https : http;
+      const proxyReq = protocol.get({
+        hostname: parsedUrl.hostname,
+        path: parsedUrl.pathname + parsedUrl.search,
+        headers: {
+          // Forward Range header so ExoPlayer can seek
+          ...(req.headers.range ? { Range: req.headers.range } : {}),
+          'User-Agent': 'Mozilla/5.0 (compatible)',
+        },
+      }, (proxyRes) => {
+        const headers = {
+          'Content-Type': proxyRes.headers['content-type'] || 'audio/mp4',
+          'Access-Control-Allow-Origin': '*',
+          'Accept-Ranges': 'bytes',
+        };
+        if (proxyRes.headers['content-length'])  headers['Content-Length']  = proxyRes.headers['content-length'];
+        if (proxyRes.headers['content-range'])   headers['Content-Range']   = proxyRes.headers['content-range'];
 
-  ytdlp.on('error', (err) => {
-    console.error('yt-dlp spawn error:', err.message);
-    if (!res.headersSent) res.status(500).json({ error: 'yt-dlp not found' });
-  });
+        res.writeHead(proxyRes.statusCode || 200, headers);
+        proxyRes.pipe(res);
+      });
 
-  ytdlp.on('close', (code) => {
-    if (code !== 0) console.warn('yt-dlp exited with code', code);
-  });
+      proxyReq.on('error', (err) => {
+        console.error('[proxy] error:', err.message);
+        if (!res.headersSent) res.status(502).json({ error: 'Proxy error' });
+      });
 
-  req.on('close', () => ytdlp.kill());
+      req.on('close', () => proxyReq.destroy());
+    }
+  );
 });
 
 // Start server — Railway provides PORT env var automatically
