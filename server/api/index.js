@@ -6,6 +6,7 @@ const https = require('https');
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const yts = require('yt-search');
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
@@ -19,16 +20,23 @@ app.use(cors());
 app.use(express.json());
 
 // yt-dlp binary downloaded via postinstall — always latest version from GitHub
-const YTDLP_BIN = path.join(__dirname, '..', 'yt-dlp');
+const YTDLP_FILENAME = os.platform() === 'win32' ? 'yt-dlp.exe' : (os.platform() === 'darwin' ? 'yt-dlp_macos' : 'yt-dlp_linux');
+const YTDLP_BIN = path.join(__dirname, '..', YTDLP_FILENAME);
 
 // YouTube cookies — needed because Railway's IP is flagged as a bot by YouTube
 // Set YOUTUBE_COOKIES env var in Railway dashboard with the contents of cookies.txt
-const COOKIES_FILE = '/tmp/yt_cookies.txt';
+const COOKIES_FILE = path.join(os.tmpdir(), 'yt_cookies.txt');
 if (process.env.YOUTUBE_COOKIES) {
-  fs.writeFileSync(COOKIES_FILE, process.env.YOUTUBE_COOKIES, 'utf8');
-  console.log('[cookies] YouTube cookies loaded from env var');
+  try {
+    fs.writeFileSync(COOKIES_FILE, process.env.YOUTUBE_COOKIES, 'utf8');
+    console.log('[cookies] YouTube cookies loaded from env var');
+  } catch (err) {
+    console.error('[cookies] Failed to write cookies file:', err);
+  }
+} else if (process.env.YOUTUBE_BROWSER_COOKIES) {
+  console.log(`[cookies] Will extract cookies directly from local browser: ${process.env.YOUTUBE_BROWSER_COOKIES}`);
 } else {
-  console.warn('[cookies] YOUTUBE_COOKIES not set — yt-dlp may be blocked by YouTube bot detection');
+  console.warn('[cookies] Neither YOUTUBE_COOKIES nor YOUTUBE_BROWSER_COOKIES set — yt-dlp may be blocked by YouTube bot detection');
 }
 
 // In-memory cache: expo-av sends multiple Range requests per playback session
@@ -60,8 +68,11 @@ app.post('/api/auth/register', async (req, res) => {
     user.password = await bcrypt.hash(password, salt);
     await user.save();
 
+    if (!process.env.JWT_SECRET) {
+      return res.status(500).json({ error: 'Server misconfiguration: JWT_SECRET not set' });
+    }
     const payload = { user: { id: user.id } };
-    jwt.sign(payload, process.env.JWT_SECRET || 'secret', { expiresIn: '7d' }, (err, token) => {
+    jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '7d' }, (err, token) => {
       if (err) throw err;
       res.json({ token });
     });
@@ -80,8 +91,11 @@ app.post('/api/auth/login', async (req, res) => {
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(400).json({ error: 'Invalid Credentials' });
 
+    if (!process.env.JWT_SECRET) {
+      return res.status(500).json({ error: 'Server misconfiguration: JWT_SECRET not set' });
+    }
     const payload = { user: { id: user.id } };
-    jwt.sign(payload, process.env.JWT_SECRET || 'secret', { expiresIn: '7d' }, (err, token) => {
+    jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '7d' }, (err, token) => {
       if (err) throw err;
       res.json({ token });
     });
@@ -253,10 +267,15 @@ app.get('/api/resolve', async (req, res) => {
 });
 
 // Debug: verify which yt-dlp version Railway is actually using
+// Protected — requires admin key set in Railway env vars
 app.get('/api/ytdlp-version', (req, res) => {
+  const adminKey = req.headers['x-admin-key'];
+  if (!adminKey || adminKey !== process.env.ADMIN_KEY) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
   exec(`"${YTDLP_BIN}" --version`, (err, stdout) => {
-    if (err) return res.status(500).json({ error: err.message, bin: YTDLP_BIN });
-    res.json({ version: stdout.trim(), bin: YTDLP_BIN });
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ version: stdout.trim() });
   });
 });
 
@@ -278,7 +297,9 @@ function extractAudioUrl(videoId) {
     ];
     // Pass cookies if available — required to bypass YouTube bot detection on cloud IPs
     if (process.env.YOUTUBE_COOKIES) {
-      cmdParts.push('--cookies', COOKIES_FILE);
+      cmdParts.push('--cookies', `"${COOKIES_FILE}"`);
+    } else if (process.env.YOUTUBE_BROWSER_COOKIES) {
+      cmdParts.push('--cookies-from-browser', process.env.YOUTUBE_BROWSER_COOKIES);
     }
     cmdParts.push(`https://www.youtube.com/watch?v=${videoId}`);
     const cmd = cmdParts.join(' ');

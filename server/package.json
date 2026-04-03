@@ -4,7 +4,7 @@
   "description": "Vercel-ready backend for fetching YouTube audio streams natively.",
   "main": "api/index.js",
   "scripts": {
-    "postinstall": "curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux -o ./yt-dlp && chmod +x ./yt-dlp && echo 'yt-dlp downloaded OK'",
+    "postinstall": "node scripts/download-yt-dlp.js",
     "start": "node api/index.js",
     "dev": "nodemon api/index.js"
   },

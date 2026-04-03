@@ -1,0 +1,20 @@
+# Environment variables — NEVER commit these
+.env
+
+# Dependencies — install via npm install
+node_modules/
+
+# yt-dlp platform binaries — auto-downloaded by postinstall script
+yt-dlp.exe
+yt-dlp_linux
+yt-dlp_macos
+
+# Cached YouTube player scripts (large, generated at runtime)
+*-player-script.js
+
+# Logs
+*.log
+npm-debug.log*
+
+# macOS
+.DS_Store
