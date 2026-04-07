@@ -291,7 +291,8 @@ function extractAudioUrl(videoId) {
     }
 
     const args = [
-      '--format', 'bestaudio',
+      '--format', 'bestaudio/best',
+      '--extractor-args', 'youtube:player_client=android,ios',
       '--get-url',
       '--no-warnings',
       '--no-playlist',
