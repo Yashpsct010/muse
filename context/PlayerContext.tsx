@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { Audio } from 'expo-av';
 import { API_URL } from '../constants/api';
-import { useYoutubeResolver } from '../hooks/useYoutubeResolver';
 
 export type Track = {
   id: string;
@@ -26,7 +25,6 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [sound, setSound] = useState<Audio.Sound | null>(null);
-  const { resolveAudioUrl } = useYoutubeResolver();
 
   // Cleanup sound on unmount
   useEffect(() => {
@@ -53,20 +51,8 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       let streamUrl = track.url;
       
       if (!streamUrl) {
-        try {
-          const innerTubeUrl = await resolveAudioUrl(track.id);
-          if (innerTubeUrl) {
-            console.log('[player] Using client-side InnerTube URL');
-            streamUrl = innerTubeUrl;
-          }
-        } catch (err) {
-          console.warn('Error resolving InnerTube URL:', err);
-        }
-
-        if (!streamUrl) {
-          console.log('[player] Falling back to Railway server');
-          streamUrl = `${API_URL}/api/stream?id=${track.id}`;
-        }
+        console.log('[player] Using proxy server');
+        streamUrl = `${API_URL}/api/stream?id=${track.id}`;
       } else {
         console.log('Playing:', streamUrl);
       }

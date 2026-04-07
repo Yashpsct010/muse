@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const { exec } = require('child_process');
+const { exec, execFile } = require('child_process');
 const https = require('https');
 const http = require('http');
 const path = require('path');
@@ -241,6 +241,8 @@ app.get('/api/search', async (req, res) => {
       durationMs: video.seconds * 1000,
     }));
 
+    // Cache search results for 1 hour to heavily optimize load times
+    res.setHeader('Cache-Control', 'public, max-age=3600');
     return res.json(tracks);
   } catch (error) {
     console.error('Search error:', error);
@@ -273,7 +275,7 @@ app.get('/api/ytdlp-version', (req, res) => {
   if (!adminKey || adminKey !== process.env.ADMIN_KEY) {
     return res.status(403).json({ error: 'Forbidden' });
   }
-  exec(`"${YTDLP_BIN}" --version`, (err, stdout) => {
+  execFile(YTDLP_BIN, ['--version'], (err, stdout) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json({ version: stdout.trim() });
   });
@@ -288,8 +290,7 @@ function extractAudioUrl(videoId) {
       return resolve(cached.url);
     }
 
-    const cmdParts = [
-      `"${YTDLP_BIN}"`,
+    const args = [
       '--format', 'bestaudio',
       '--get-url',
       '--no-warnings',
@@ -297,14 +298,13 @@ function extractAudioUrl(videoId) {
     ];
     // Pass cookies if available — required to bypass YouTube bot detection on cloud IPs
     if (process.env.YOUTUBE_COOKIES) {
-      cmdParts.push('--cookies', `"${COOKIES_FILE}"`);
+      args.push('--cookies', COOKIES_FILE);
     } else if (process.env.YOUTUBE_BROWSER_COOKIES) {
-      cmdParts.push('--cookies-from-browser', process.env.YOUTUBE_BROWSER_COOKIES);
+      args.push('--cookies-from-browser', process.env.YOUTUBE_BROWSER_COOKIES);
     }
-    cmdParts.push(`https://www.youtube.com/watch?v=${videoId}`);
-    const cmd = cmdParts.join(' ');
+    args.push(`https://www.youtube.com/watch?v=${videoId}`);
 
-    exec(cmd, { timeout: 25000 }, (err, stdout, stderr) => {
+    execFile(YTDLP_BIN, args, { timeout: 120000 }, (err, stdout, stderr) => {
       if (err) {
         console.error('[yt-dlp error]', stderr);
         return reject(new Error('yt-dlp failed: ' + stderr.trim()));
