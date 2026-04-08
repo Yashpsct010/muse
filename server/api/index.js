@@ -14,6 +14,7 @@ const jwt = require('jsonwebtoken');
 const authMiddleware = require('../middleware/auth');
 const User = require('../models/User');
 const Playlist = require('../models/Playlist');
+const { generate } = require('youtube-po-token-generator');
 
 const app = express();
 app.use(cors());
@@ -43,6 +44,47 @@ if (process.env.YOUTUBE_COOKIES) {
 // Cache the Google CDN URL so yt-dlp only runs ONCE per video (TTL: 4 hours)
 const urlCache = new Map();
 const CACHE_TTL = 4 * 60 * 60 * 1000;
+
+// PO Token Management: Bypasses BotGuard challenges on datacenter IPs
+const PoTokenManager = {
+  token: null,
+  visitorData: null,
+  lastRefresh: 0,
+  refreshing: false,
+
+  async getTokens() {
+    const NOW = Date.now();
+    // Refresh token every 30 minutes
+    if (this.token && (NOW - this.lastRefresh < 30 * 60 * 1000)) {
+      return { token: this.token, visitorData: this.visitorData };
+    }
+
+    if (this.refreshing) {
+      // Wait for existing refresh if one is in progress
+      while (this.refreshing) {
+        await new Promise(r => setTimeout(r, 500));
+      }
+      return { token: this.token, visitorData: this.visitorData };
+    }
+
+    try {
+      this.refreshing = true;
+      console.log('[botguard] Generating fresh PO Token...');
+      const { poToken, visitorData } = await generate();
+      this.token = poToken;
+      this.visitorData = visitorData;
+      this.lastRefresh = Date.now();
+      console.log('[botguard] Fresh PO Token generated successfully');
+      return { token: this.token, visitorData: this.visitorData };
+    } catch (err) {
+      console.error('[botguard] Failed to generate PO Token:', err.message);
+      // Fallback to old values if available
+      return { token: this.token, visitorData: this.visitorData };
+    } finally {
+      this.refreshing = false;
+    }
+  }
+};
 
 // Connect to MongoDB
 if (process.env.MONGODB_URI) {
@@ -281,18 +323,20 @@ app.get('/api/ytdlp-version', (req, res) => {
   });
 });
 
-function extractAudioUrl(videoId) {
-  return new Promise((resolve, reject) => {
+async function extractAudioUrl(videoId) {
+  try {
     // Serve from cache if fresh (avoids duplicate yt-dlp calls from expo-av Range probes)
     const cached = urlCache.get(videoId);
     if (cached && Date.now() - cached.ts < CACHE_TTL) {
       console.log('[cache] hit for', videoId);
-      return resolve(cached.url);
+      return cached.url;
     }
+
+    const { token, visitorData } = await PoTokenManager.getTokens();
 
     const args = [
       '--format', 'bestaudio/best',
-      '--extractor-args', 'youtube:player_client=android,ios',
+      '--extractor-args', `youtube:player_client=android,ios;po_token=web+${token || ''};visitor_data=${visitorData || ''}`,
       '--get-url',
       '--no-warnings',
       '--no-playlist',
@@ -303,21 +347,23 @@ function extractAudioUrl(videoId) {
     } else if (process.env.YOUTUBE_BROWSER_COOKIES) {
       args.push('--cookies-from-browser', process.env.YOUTUBE_BROWSER_COOKIES);
     }
-    args.push(`https://www.youtube.com/watch?v=${videoId}`);
-
-    execFile(YTDLP_BIN, args, { timeout: 120000 }, (err, stdout, stderr) => {
-      if (err) {
-        console.error('[yt-dlp error]', stderr);
-        return reject(new Error('yt-dlp failed: ' + stderr.trim()));
-      }
-      const url = stdout.trim().split('\n')[0];
-      if (!url || !url.startsWith('http')) {
-        return reject(new Error('yt-dlp returned invalid URL: ' + url));
-      }
-      urlCache.set(videoId, { url, ts: Date.now() });
-      resolve(url);
+    return new Promise((resolve, reject) => {
+      execFile(YTDLP_BIN, args, { timeout: 120000 }, (err, stdout, stderr) => {
+        if (err) {
+          console.error('[yt-dlp error]', stderr);
+          return reject(new Error('yt-dlp failed: ' + stderr.trim()));
+        }
+        const url = stdout.trim().split('\n')[0];
+        if (!url || !url.startsWith('http')) {
+          return reject(new Error('yt-dlp returned invalid URL: ' + url));
+        }
+        urlCache.set(videoId, { url, ts: Date.now() });
+        resolve(url);
+      });
     });
-  });
+  } catch (err) {
+    throw err;
+  }
 }
 
 app.get('/api/stream', async (req, res) => {

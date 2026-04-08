@@ -51,33 +51,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       let streamUrl = track.url;
       
       if (!streamUrl) {
-        console.log('[player] Attempting direct extraction via Piped APIs...');
-        const PIPED_INSTANCES = [
-          'https://pipedapi.kavin.rocks',
-          'https://pipedapi.syncpundit.io',
-          'https://api.piped.projectsegfau.lt'
-        ];
-
-        for (const instance of PIPED_INSTANCES) {
-          try {
-            const res = await fetch(`${instance}/streams/${track.id}`);
-            if (res.ok) {
-              const data = await res.json();
-              if (data.audioStreams && data.audioStreams.length > 0) {
-                const bestAudio = data.audioStreams.sort((a: any, b: any) => b.bitrate - a.bitrate)[0];
-                streamUrl = bestAudio.url;
-                console.log(`[player] Extraction successful via ${instance}`);
-                break;
-              }
-            }
-          } catch (err) {
-            console.log(`[player] Failed instance ${instance}`);
-          }
-        }
-      }
-
-      if (!streamUrl) {
-        console.log('[player] All client APIs failed, falling back to Railway proxy');
+        console.log('[player] Using proxy server');
         streamUrl = `${API_URL}/api/stream?id=${track.id}`;
       } else {
         console.log('Playing:', streamUrl);
