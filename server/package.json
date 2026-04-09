@@ -5,8 +5,8 @@
   "main": "api/index.js",
   "scripts": {
     "postinstall": "node scripts/download-yt-dlp.js",
-    "start": "node api/index.js",
-    "dev": "nodemon api/index.js"
+    "start": "node --max-old-space-size=300 api/index.js",
+    "dev": "node --max-old-space-size=300 api/index.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

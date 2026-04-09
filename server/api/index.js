@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const { exec, execFile } = require('child_process');
+const { exec, execFile, fork } = require('child_process');
 const https = require('https');
 const http = require('http');
 const path = require('path');
@@ -14,7 +14,6 @@ const jwt = require('jsonwebtoken');
 const authMiddleware = require('../middleware/auth');
 const User = require('../models/User');
 const Playlist = require('../models/Playlist');
-const { generate } = require('youtube-po-token-generator');
 
 const app = express();
 app.use(cors());
@@ -69,12 +68,40 @@ const PoTokenManager = {
 
     try {
       this.refreshing = true;
-      console.log('[botguard] Generating fresh PO Token...');
-      const { poToken, visitorData } = await generate();
+      console.log('[botguard] Generating fresh PO Token via isolated worker...');
+      
+      const { poToken, visitorData } = await new Promise((resolve, reject) => {
+        const worker = fork(path.join(__dirname, 'token-worker.js'), [], {
+          // Limit the worker's memory so it can't crash the host
+          execArgv: ['--max-old-space-size=256']
+        });
+
+        const timeout = setTimeout(() => {
+          worker.kill();
+          reject(new Error('Token generation timed out (60s)'));
+        }, 60000);
+
+        worker.on('message', (data) => {
+          clearTimeout(timeout);
+          if (data.error) reject(new Error(data.error));
+          else resolve(data);
+        });
+
+        worker.on('error', (err) => {
+          clearTimeout(timeout);
+          reject(err);
+        });
+
+        worker.on('exit', (code) => {
+          clearTimeout(timeout);
+          if (code !== 0) reject(new Error(`Worker exited with code ${code}`));
+        });
+      });
+
       this.token = poToken;
       this.visitorData = visitorData;
       this.lastRefresh = Date.now();
-      console.log('[botguard] Fresh PO Token generated successfully');
+      console.log('[botguard] Fresh PO Token generated successfully in isolation');
       return { token: this.token, visitorData: this.visitorData };
     } catch (err) {
       console.error('[botguard] Failed to generate PO Token:', err.message);
