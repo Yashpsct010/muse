@@ -374,6 +374,8 @@ async function extractAudioUrl(videoId) {
     } else if (process.env.YOUTUBE_BROWSER_COOKIES) {
       args.push('--cookies-from-browser', process.env.YOUTUBE_BROWSER_COOKIES);
     }
+    args.push(`https://www.youtube.com/watch?v=${videoId}`);
+
     return new Promise((resolve, reject) => {
       execFile(YTDLP_BIN, args, { timeout: 120000 }, (err, stdout, stderr) => {
         if (err) {
